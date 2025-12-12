@@ -1,0 +1,49 @@
+name: Snyk Security Scan
+
+on:
+  push:
+    branches: [ main, master ]
+  # pull_request:
+  #   branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  security-scan:
+    name: Snyk IaC and Container Scans
+    runs-on: ubuntu-latest
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      SNYK_CFG_ORG: varner-tech-engineering
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Build Container Image
+        run: docker build -t nodejs-goof .
+
+      - name: Snyk Container Scan (test + monitor)
+        continue-on-error: true
+        run: |
+          snyk container test nodejs-goof --severity-threshold=high --file=Dockerfile --project-name=ga-container-full --target-reference=nodejs-goof-ga-target --target-name=nodejs-goof || true
+          snyk container monitor nodejs-goof --file=Dockerfile --project-name=ga-container-full --target-reference=nodejs-goof-ga-target --target-name=nodejs-goof
+
+      - name: Snyk IaC Scan
+        continue-on-error: true
+        run: snyk iac test vulnerable.tf --report --target-name=nodejs-goof --target-reference=nodejs-goof-ga-target --remote-repo-url=https://github.com/varner-tech/nodejs-goof
+
+      - name: Upload Snyk results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snyk-results
+          path: snyk*.json
+          if-no-files-found: ignore
