@@ -1,0 +1,108 @@
+const express = require('express');
+const router = express.Router();
+
+const sanitizeInput = (value = '') =>
+    String(value).replace(/[&<>"'`=/]/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+        '`': '&#96;',
+        '=': '&#61;',
+        '/': '&#47;'
+    }[char] || char));
+
+const { startVulnerableResponse } = require('../service/xssResponder');
+
+// UNSAFE: Direct XSS vulnerability - matches pattern Snyk detects
+// This is a simple reflected XSS that Snyk should flag
+// router.get('/', (req, res) => {
+//     // Get user input directly from query parameter without sanitization
+//     // This is the source of the XSS vulnerability
+//     const userInput = req.query.input || 'No input provided';
+
+//     const html = processUserInput(userInput, res);
+
+//     res.send(html);
+// });
+
+function processUserInput(userInput, res) {
+    return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>XSS Vulnerability Demo</title>
+        </head>
+        <body>
+            <h1>XSS Vulnerability Demo</h1>
+            <div>${userInput}</div>
+            <p><a href="/xss-vuln/secure?input=Try%20this%20secure%20endpoint">Try the secure endpoint</a></p>
+        </body>
+        </html>   
+    `; 
+}
+ 
+
+// SECURE: Safe endpoint with proper HTML escaping
+router.get('/secure', (req, res) => {
+    // Get user input from query parameter
+    const userInput = req.query.input || 'No input provided';
+    
+    // SECURE: Use Content Security Policy header to mitigate XSS impact
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'");
+    
+    // SECURE: Set X-XSS-Protection header (for older browsers)
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    
+    // SECURE: Set X-Content-Type-Options to prevent MIME type sniffing
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    
+    res.contentType('text/plain').send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Secure XSS Demo</title>
+            <style>
+                .user-input {
+                    background-color: #f0f0f0;
+                    padding: 10px;
+                    border: 1px solid #ddd;
+                    margin: 10px 0;
+                    word-wrap: break-word;
+                }
+                .safe {
+                    color: green;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Secure XSS Demo</h1>
+            <p>Your input (safely escaped):</p>
+            <div class="user-input safe">${userInput}</div>
+            <p>Try entering script tags or other HTML - they'll be escaped!</p>
+            <form action="/xss-vuln/secure" method="get">
+                <input type="text" name="input" placeholder="Enter some text" value="${userInput}">
+                <button type="submit">Submit</button>
+            </form>
+            <p><a href="/xss-vuln">Back to vulnerable example</a></p>
+        </body>
+        </html>
+    `);
+});
+
+// SECURE: JSON endpoint for automated testing with sanitized echo
+router.get('/secure/json', (req, res) => {
+    const userInput = req.query.input;
+
+    res.setHeader('Content-Security-Policy', "default-src 'none'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    res.json({
+        message: 'Secure JSON echo',
+        echo: userInput,
+        rawLength: userInput.length
+    });
+});
+
+module.exports = router;
